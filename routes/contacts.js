@@ -5,23 +5,38 @@ const Contact = require('../models/Contact');
 // Get all contacts
 router.get('/', async (req, res) => {
   try {
-    const { search } = req.query;
-    
+    const { search, type } = req.query;
+
     let query = {};
-    
+
+    // Filter by contact type (customer/supplier)
+    if (type === 'customer') {
+      query['contactType.isCustomer'] = true;
+    } else if (type === 'supplier') {
+      query['contactType.isSupplier'] = true;
+    }
+
     // Search functionality
     if (search) {
-      query.$or = [
+      const searchConditions = [
         { contactName: { $regex: search, $options: 'i' } },
         { accountNumber: { $regex: search, $options: 'i' } },
         { email: { $regex: search, $options: 'i' } },
         { phone: { $regex: search, $options: 'i' } }
       ];
+
+      if (Object.keys(query).length > 0) {
+        query.$and = [{ ...query }, { $or: searchConditions }];
+        delete query['contactType.isCustomer'];
+        delete query['contactType.isSupplier'];
+      } else {
+        query.$or = searchConditions;
+      }
     }
-    
+
     const contacts = await Contact.find(query)
       .sort({ contactName: 1 });
-    
+
     res.json(contacts);
   } catch (error) {
     res.status(500).json({ message: error.message });

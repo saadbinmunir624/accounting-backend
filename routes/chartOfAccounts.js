@@ -96,7 +96,11 @@ router.get('/code/:code', async (req, res) => {
 router.post('/', async (req, res) => {
   try {
     console.log('Creating chart of account:', req.body);
-    
+
+    // Clean up empty strings for ObjectId fields
+    if (req.body.tax === '') delete req.body.tax;
+    if (req.body.accountType === '') delete req.body.accountType;
+
     // Validate AccountType exists
     if (req.body.accountType) {
       const accountTypeExists = await AccountType.findById(req.body.accountType);

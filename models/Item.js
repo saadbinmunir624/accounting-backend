@@ -23,7 +23,7 @@ const itemSchema = new mongoose.Schema({
   },
   purchaseAccount: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'ChartOfAccounts'
+    ref: 'ChartOfAccount'
   },
   taxRateOnPurchase: {
     type: mongoose.Schema.Types.ObjectId,
@@ -36,7 +36,7 @@ const itemSchema = new mongoose.Schema({
   },
   saleAccount: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'ChartOfAccounts'
+    ref: 'ChartOfAccount'
   },
   taxRateOnSale: {
     type: mongoose.Schema.Types.ObjectId,

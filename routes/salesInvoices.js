@@ -29,6 +29,10 @@ router.get('/', async (req, res) => {
       .populate('contact', 'contactName email phone accountNumber')
       .populate('onlinePayment', 'bankName accountName')
       .populate({
+        path: 'paymentAccounts.bankAccount',
+        select: 'bankName accountName'
+      })
+      .populate({
         path: 'lineItems.item',
         select: 'itemCode name'
       })
@@ -69,6 +73,10 @@ router.get('/:id', async (req, res) => {
     const invoice = await SalesInvoice.findById(req.params.id)
       .populate('contact', 'contactName email phone accountNumber billingAddress')
       .populate('onlinePayment', 'bankName accountName bankAccountType')
+      .populate({
+        path: 'paymentAccounts.bankAccount',
+        select: 'bankName accountName bankAccountType'
+      })
       .populate({
         path: 'lineItems.item',
         select: 'itemCode name description'
@@ -153,6 +161,15 @@ router.post('/', async (req, res) => {
         message: 'Invoice must have at least one line item'
       });
     }
+
+    // Clean up empty strings in line items for ObjectId fields
+    req.body.lineItems = req.body.lineItems.map(item => {
+      const cleanedItem = { ...item };
+      if (cleanedItem.account === '') delete cleanedItem.account;
+      if (cleanedItem.taxRate === '') delete cleanedItem.taxRate;
+      if (cleanedItem.project === '') delete cleanedItem.project;
+      return cleanedItem;
+    });
     
     // Validate each line item's item reference
     for (let i = 0; i < req.body.lineItems.length; i++) {
@@ -191,6 +208,7 @@ router.post('/', async (req, res) => {
     const populatedInvoice = await SalesInvoice.findById(invoice._id)
       .populate('contact', 'contactName email phone accountNumber')
       .populate('onlinePayment', 'bankName accountName')
+      .populate('paymentAccounts.bankAccount', 'bankName accountName')
       .populate('lineItems.item', 'itemCode name')
       .populate('lineItems.account', 'code name')
       .populate('lineItems.taxRate', 'name rate')
@@ -244,19 +262,30 @@ router.post('/', async (req, res) => {
 router.patch('/:id', async (req, res) => {
   try {
     console.log('Updating invoice:', req.params.id);
-    
+
     const existingInvoice = await SalesInvoice.findById(req.params.id);
-    
+
     if (!existingInvoice) {
       return res.status(404).json({
         success: false,
         message: 'Sales invoice not found'
       });
     }
-    
+
     // Don't allow editing invoice number
     if (req.body.invoiceNumber) {
       delete req.body.invoiceNumber;
+    }
+
+    // Clean up empty strings in line items for ObjectId fields
+    if (req.body.lineItems) {
+      req.body.lineItems = req.body.lineItems.map(item => {
+        const cleanedItem = { ...item };
+        if (cleanedItem.account === '') delete cleanedItem.account;
+        if (cleanedItem.taxRate === '') delete cleanedItem.taxRate;
+        if (cleanedItem.project === '') delete cleanedItem.project;
+        return cleanedItem;
+      });
     }
     
     // Update invoice
@@ -267,6 +296,7 @@ router.patch('/:id', async (req, res) => {
     const updatedInvoice = await SalesInvoice.findById(existingInvoice._id)
       .populate('contact', 'contactName email phone')
       .populate('onlinePayment', 'bankName accountName')
+      .populate('paymentAccounts.bankAccount', 'bankName accountName')
       .populate('lineItems.item', 'itemCode name')
       .populate('lineItems.account', 'code name')
       .populate('lineItems.taxRate', 'name rate')

@@ -105,15 +105,26 @@ const salesInvoiceSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'BankAccount'
   },
-  
+
+  paymentAccounts: [{
+    bankAccount: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'BankAccount'
+    },
+    amount: {
+      type: Number,
+      min: [0, 'Payment amount cannot be negative']
+    }
+  }],
+
   amountTreatment: {
     type: String,
     enum: {
-      values: ['Inclusive', 'Exclusive', 'No Tax'],
+      values: ['Including', 'Excluding', 'No Tax'],
       message: '{VALUE} is not a valid amount treatment'
     },
     required: [true, 'Amount treatment is required'],
-    default: 'Exclusive'
+    default: 'Excluding'
   },
   
   lineItems: {
@@ -171,6 +182,30 @@ salesInvoiceSchema.index({ issueDate: -1 });
 salesInvoiceSchema.index({ status: 1 });
 
 // ============================================
+// PRE-VALIDATE MIDDLEWARE 0: Validate split payment amounts
+// ============================================
+salesInvoiceSchema.pre('validate', function(next) {
+  // If paymentAccounts exists and has items, validate the total
+  if (this.paymentAccounts && this.paymentAccounts.length > 0) {
+    const totalPaymentAmount = this.paymentAccounts.reduce((sum, payment) => {
+      return sum + (payment.amount || 0);
+    }, 0);
+
+    // Round to 2 decimal places for comparison
+    const roundedTotal = Math.round(totalPaymentAmount * 100) / 100;
+    const roundedGrandTotal = Math.round(this.grandTotal * 100) / 100;
+
+    // Allow small floating point differences (0.01)
+    if (Math.abs(roundedTotal - roundedGrandTotal) > 0.01) {
+      return next(new Error(
+        `Split payment total ($${roundedTotal}) must equal grand total ($${roundedGrandTotal})`
+      ));
+    }
+  }
+  next();
+});
+
+// ============================================
 // PRE-VALIDATE MIDDLEWARE 1: Auto-generate Invoice Number
 // ============================================
 salesInvoiceSchema.pre('validate', async function(next) {
@@ -186,13 +221,13 @@ salesInvoiceSchema.pre('validate', async function(next) {
       let nextNumber = 1;
       
       if (lastInvoice && lastInvoice.invoiceNumber) {
-        const match = lastInvoice.invoiceNumber.match(/INV-(\d+)/);
+        const match = lastInvoice.invoiceNumber.match(/KDM-(\d+)/);
         if (match) {
           nextNumber = parseInt(match[1], 10) + 1;
         }
       }
 
-      this.invoiceNumber = `INV-${String(nextNumber).padStart(4, '0')}`;
+      this.invoiceNumber = `KDM-${String(nextNumber).padStart(2, '0')}`;
       console.log('✅ Generated invoice number:', this.invoiceNumber);
     } catch (error) {
       console.error('❌ Error generating invoice number:', error);
@@ -237,20 +272,14 @@ salesInvoiceSchema.pre('validate', async function(next) {
         console.log(`   ✅ Populated price: ${lineItem.price}`);
       }
       
-      // Auto-populate account
-      if (!lineItem.account) {
-        if (!item.saleAccount) {
-          return next(new Error(`Item "${item.name}" does not have a sale account configured`));
-        }
+      // Auto-populate account (optional)
+      if (!lineItem.account && item.saleAccount) {
         lineItem.account = item.saleAccount._id || item.saleAccount;
         console.log(`   ✅ Populated account: ${lineItem.account}`);
       }
-      
-      // Auto-populate tax rate
-      if (!lineItem.taxRate) {
-        if (!item.taxRateOnSale) {
-          return next(new Error(`Item "${item.name}" does not have a tax rate configured`));
-        }
+
+      // Auto-populate tax rate (optional)
+      if (!lineItem.taxRate && item.taxRateOnSale) {
         lineItem.taxRate = item.taxRateOnSale._id || item.taxRateOnSale;
         console.log(`   ✅ Populated tax rate: ${lineItem.taxRate}`);
       }
@@ -328,16 +357,17 @@ salesInvoiceSchema.pre('save', function(next) {
 // ============================================
 salesInvoiceSchema.methods.calculateLineItemAmounts = async function() {
   const TaxType = mongoose.model('TaxType');
-  
+
   for (let item of this.lineItems) {
-    // Fetch tax rate percentage
-    const taxType = await TaxType.findById(item.taxRate);
-    
-    if (!taxType) {
-      throw new Error(`Tax type not found: ${item.taxRate}`);
+    // Fetch tax rate percentage (optional)
+    let taxRatePercent = 0;
+
+    if (item.taxRate) {
+      const taxType = await TaxType.findById(item.taxRate);
+      if (taxType) {
+        taxRatePercent = taxType.taxPercentage || 0;
+      }
     }
-    
-    const taxRatePercent = taxType.rate || 0;
 
     // Calculate subtotal
     const subtotal = item.qty * item.price;

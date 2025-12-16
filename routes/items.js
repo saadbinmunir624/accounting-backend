@@ -88,26 +88,46 @@ router.get('/code/:itemCode', async (req, res) => {
 // POST create new item
 router.post('/', async (req, res) => {
   try {
-    const item = await Item.create(req.body);
+    console.log('Creating item with data:', JSON.stringify(req.body, null, 2));
+
+    // Clean up empty string values for ObjectId fields
+    const cleanedData = { ...req.body };
+    if (cleanedData.purchaseAccount === '') delete cleanedData.purchaseAccount;
+    if (cleanedData.taxRateOnPurchase === '') delete cleanedData.taxRateOnPurchase;
+    if (cleanedData.saleAccount === '') delete cleanedData.saleAccount;
+    if (cleanedData.taxRateOnSale === '') delete cleanedData.taxRateOnSale;
+
+    const item = await Item.create(cleanedData);
     const populatedItem = await Item.findById(item._id)
       .populate('purchaseAccount', 'accountCode accountName')
       .populate('taxRateOnPurchase', 'name rate')
       .populate('saleAccount', 'accountCode accountName')
       .populate('taxRateOnSale', 'name rate');
-    
+
     res.status(201).json({
       success: true,
       message: 'Item created successfully',
       data: populatedItem
     });
   } catch (error) {
+    console.error('Error creating item:', error);
+
     if (error.code === 11000) {
       return res.status(400).json({
         success: false,
         message: 'Item code already exists'
       });
     }
-    
+
+    if (error.name === 'ValidationError') {
+      const errors = Object.values(error.errors).map(err => err.message);
+      return res.status(400).json({
+        success: false,
+        message: 'Validation Error',
+        errors: errors
+      });
+    }
+
     res.status(400).json({
       success: false,
       message: 'Bad Request',
@@ -119,9 +139,18 @@ router.post('/', async (req, res) => {
 // PATCH update item
 router.patch('/:id', async (req, res) => {
   try {
+    console.log('Updating item with data:', JSON.stringify(req.body, null, 2));
+
+    // Clean up empty string values for ObjectId fields
+    const cleanedData = { ...req.body };
+    if (cleanedData.purchaseAccount === '') delete cleanedData.purchaseAccount;
+    if (cleanedData.taxRateOnPurchase === '') delete cleanedData.taxRateOnPurchase;
+    if (cleanedData.saleAccount === '') delete cleanedData.saleAccount;
+    if (cleanedData.taxRateOnSale === '') delete cleanedData.taxRateOnSale;
+
     const item = await Item.findByIdAndUpdate(
       req.params.id,
-      req.body,
+      cleanedData,
       {
         new: true,
         runValidators: true
@@ -131,27 +160,38 @@ router.patch('/:id', async (req, res) => {
       .populate('taxRateOnPurchase', 'name rate')
       .populate('saleAccount', 'accountCode accountName')
       .populate('taxRateOnSale', 'name rate');
-    
+
     if (!item) {
       return res.status(404).json({
         success: false,
         message: 'Item not found'
       });
     }
-    
+
     res.status(200).json({
       success: true,
       message: 'Item updated successfully',
       data: item
     });
   } catch (error) {
+    console.error('Error updating item:', error);
+
     if (error.code === 11000) {
       return res.status(400).json({
         success: false,
         message: 'Item code already exists'
       });
     }
-    
+
+    if (error.name === 'ValidationError') {
+      const errors = Object.values(error.errors).map(err => err.message);
+      return res.status(400).json({
+        success: false,
+        message: 'Validation Error',
+        errors: errors
+      });
+    }
+
     res.status(400).json({
       success: false,
       message: 'Bad Request',

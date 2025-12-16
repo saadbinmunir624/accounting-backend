@@ -25,7 +25,7 @@ const chartOfAccountSchema = new mongoose.Schema({
   tax: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'TaxType',
-    required: [true, 'Tax type is required']
+    required: false
   }
 }, {
   timestamps: true

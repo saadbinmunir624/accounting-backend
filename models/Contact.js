@@ -50,9 +50,17 @@ const contactSchema = new mongoose.Schema({
   },
   accountNumber: {
     type: String,
-    unique: true,
-    sparse: true,
     trim: true
+  },
+  contactType: {
+    isCustomer: {
+      type: Boolean,
+      default: false
+    },
+    isSupplier: {
+      type: Boolean,
+      default: false
+    }
   },
   email: {
     type: String,
@@ -90,6 +98,15 @@ const contactSchema = new mongoose.Schema({
   }
 }, {
   timestamps: true
+});
+
+// Validation: At least one contact type must be selected
+contactSchema.pre('save', function(next) {
+  if (!this.contactType.isCustomer && !this.contactType.isSupplier) {
+    next(new Error('Contact must be either a Customer or Supplier (or both)'));
+  } else {
+    next();
+  }
 });
 
 
