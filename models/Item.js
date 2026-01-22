@@ -50,8 +50,7 @@ const itemSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Define indexes here only (not in the schema fields above)
-itemSchema.index({ itemCode: 1 });
+// itemCode already has unique index, no need for .index()
 itemSchema.index({ name: 1 });
 
 module.exports = mongoose.model('Item', itemSchema);

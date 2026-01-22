@@ -9,11 +9,76 @@ const Item = require('../models/Item');
 const Project = require('../models/Project');
 
 // ============================================
+// TRACKING: Last overdue check date
+// ============================================
+let lastOverdueCheckDate = null;
+
+// ============================================
+// HELPER: Check if today is a new day
+// ============================================
+const isNewDay = () => {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  
+  if (!lastOverdueCheckDate) return true;
+  
+  const lastCheckDate = new Date(lastOverdueCheckDate);
+  lastCheckDate.setHours(0, 0, 0, 0);
+  
+  return today > lastCheckDate;
+};
+
+// ============================================
+// HELPER: Check and update overdue quotations (only once per day)
+// ============================================
+const updateOverdueQuotations = async () => {
+  // Only run if it's a new day
+  if (!isNewDay()) {
+    console.log('>>> Overdue check already ran today, skipping...');
+    return;
+  }
+  
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  lastOverdueCheckDate = today;
+  
+  const sentQuotations = await Quotation.find({ status: 'Sent' });
+  
+  console.log(`\n>>> DAILY OVERDUE CHECK: Checking ${sentQuotations.length} 'Sent' quotations...`);
+  console.log(`Today's date (no time): ${today.toISOString().split('T')[0]}`);
+  
+  for (let quotation of sentQuotations) {
+    if (quotation.dueDate) {
+      const dueDate = new Date(quotation.dueDate);
+      dueDate.setHours(0, 0, 0, 0);
+      
+      const dueDateStr = dueDate.toISOString().split('T')[0];
+      console.log(`Quotation ${quotation.quotationNumber}: Due=${dueDateStr}, Status=${quotation.status}, IsPastDue=${dueDate < today}`);
+      
+      if (dueDate < today) {
+        console.log(`  → Updating ${quotation.quotationNumber} to Overdue`);
+        quotation.status = 'Overdue';
+        try {
+          await quotation.save();
+          console.log(`  ✓ Successfully saved ${quotation.quotationNumber}`);
+        } catch (err) {
+          console.error(`  ✗ Error saving ${quotation.quotationNumber}:`, err.message);
+        }
+      }
+    }
+  }
+  console.log(`<<< Overdue check complete\n`);
+};
+
+// ============================================
 // GET all quotations
 // ============================================
 router.get('/', async (req, res) => {
   try {
     const { status, contact, startDate, endDate } = req.query;
+
+    // Update overdue quotations before fetching
+    await updateOverdueQuotations();
 
     const filter = {};
     if (status) filter.status = status;
@@ -257,6 +322,36 @@ router.patch('/:id', async (req, res) => {
         success: false,
         message: 'Quotation not found'
       });
+    }
+
+    // Handle overdue logic on due date changes
+    if (req.body.dueDate) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const newDueDate = new Date(req.body.dueDate);
+      newDueDate.setHours(0, 0, 0, 0);
+
+      // Auto-revert: If updating dueDate to today/future and currently Overdue, move back to Sent (unless explicitly marking Paid)
+      if (existingQuotation.status === 'Overdue' && newDueDate >= today && req.body.status !== 'Paid') {
+        console.log(`  → Auto-reverting ${existingQuotation.quotationNumber} from Overdue to Sent (due date moved to future)`);
+        req.body.status = 'Sent';
+      }
+    }
+
+    // If quotation is Overdue and due date is still in the past, only allow status change to Paid unless due date is moved future
+    if (existingQuotation.status === 'Overdue') {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const effectiveDue = req.body.dueDate ? new Date(req.body.dueDate) : existingQuotation.dueDate;
+      if (effectiveDue) effectiveDue.setHours(0, 0, 0, 0);
+
+      const stillPastDue = effectiveDue && effectiveDue < today;
+      if (stillPastDue && req.body.status && req.body.status !== 'Paid') {
+        return res.status(400).json({
+          success: false,
+          message: 'Overdue quotation: change due date to today/future or set status to Paid'
+        });
+      }
     }
 
     // Don't allow editing quotation number

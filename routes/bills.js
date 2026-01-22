@@ -8,11 +8,76 @@ const Item = require('../models/Item');
 const Project = require('../models/Project');
 
 // ============================================
+// TRACKING: Last overdue check date
+// ============================================
+let lastOverdueCheckDate = null;
+
+// ============================================
+// HELPER: Check if today is a new day
+// ============================================
+const isNewDay = () => {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  
+  if (!lastOverdueCheckDate) return true;
+  
+  const lastCheckDate = new Date(lastOverdueCheckDate);
+  lastCheckDate.setHours(0, 0, 0, 0);
+  
+  return today > lastCheckDate;
+};
+
+// ============================================
+// HELPER: Check and update overdue bills (only once per day)
+// ============================================
+const updateOverdueBills = async () => {
+  // Only run if it's a new day
+  if (!isNewDay()) {
+    console.log('>>> Overdue check already ran today, skipping...');
+    return;
+  }
+  
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  lastOverdueCheckDate = today;
+  
+  const sentBills = await Bill.find({ status: 'Payment Pending' });
+  
+  console.log(`\n>>> DAILY OVERDUE CHECK: Checking ${sentBills.length} 'Payment Pending' bills...`);
+  console.log(`Today's date (no time): ${today.toISOString().split('T')[0]}`);
+  
+  for (let bill of sentBills) {
+    if (bill.dueDate) {
+      const dueDate = new Date(bill.dueDate);
+      dueDate.setHours(0, 0, 0, 0);
+      
+      const dueDateStr = dueDate.toISOString().split('T')[0];
+      console.log(`Bill ${bill.billNumber}: Due=${dueDateStr}, Status=${bill.status}, IsPastDue=${dueDate < today}`);
+      
+      if (dueDate < today) {
+        console.log(`  → Updating ${bill.billNumber} to Overdue`);
+        bill.status = 'Overdue';
+        try {
+          await bill.save();
+          console.log(`  ✓ Successfully saved ${bill.billNumber}`);
+        } catch (err) {
+          console.error(`  ✗ Error saving ${bill.billNumber}:`, err.message);
+        }
+      }
+    }
+  }
+  console.log(`<<< Overdue check complete\n`);
+};
+
+// ============================================
 // GET all bills
 // ============================================
 router.get('/', async (req, res) => {
   try {
     const { status, contact, startDate, endDate } = req.query;
+
+    // Update overdue bills before fetching
+    await updateOverdueBills();
 
     const filter = {};
     if (status) filter.status = status;
@@ -68,6 +133,9 @@ router.get('/', async (req, res) => {
 // ============================================
 router.get('/:id', async (req, res) => {
   try {
+    // Update overdue bills before fetching
+    await updateOverdueBills();
+    
     const bill = await Bill.findById(req.params.id)
       .populate('contact', 'contactName email phone accountNumber billingAddress')
       .populate('onlinePayment', 'bankName accountName bankAccountType')
@@ -254,6 +322,36 @@ router.patch('/:id', async (req, res) => {
         success: false,
         message: 'Bill not found'
       });
+    }
+
+    // Handle overdue logic on due date changes
+    if (req.body.dueDate) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const newDueDate = new Date(req.body.dueDate);
+      newDueDate.setHours(0, 0, 0, 0);
+
+      // Auto-revert: If updating dueDate to today/future and currently Overdue, move back to Payment Pending
+      if (existingBill.status === 'Overdue' && newDueDate >= today) {
+        console.log(`  → Auto-reverting ${existingBill.billNumber} from Overdue to Payment Pending (due date moved to future)`);
+        req.body.status = 'Payment Pending';
+      }
+    }
+
+    // If bill is Overdue and due date is still in the past, prevent status changes
+    if (existingBill.status === 'Overdue') {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const effectiveDue = req.body.dueDate ? new Date(req.body.dueDate) : existingBill.dueDate;
+      if (effectiveDue) effectiveDue.setHours(0, 0, 0, 0);
+
+      const stillPastDue = effectiveDue && effectiveDue < today;
+      if (stillPastDue && req.body.status && req.body.status !== 'Overdue') {
+        return res.status(400).json({
+          success: false,
+          message: 'Overdue bill: change due date to today/future before changing status'
+        });
+      }
     }
 
     // Don't allow editing bill number

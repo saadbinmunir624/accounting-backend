@@ -30,6 +30,7 @@ mongoose.connect(process.env.MONGODB_URI)
 // Import routes
 const accountTypeRoutes = require('./routes/accountTypes');
 const bankAccountRoutes = require('./routes/bankAccounts');
+const bankTransactionRoutes = require('./routes/bankTransactions');
 const bankAccountTypeRoutes = require('./routes/bankAccountTypes');
 const billRoutes = require('./routes/bills');
 const chartOfAccountsRoutes = require('./routes/chartOfAccounts');
@@ -69,6 +70,7 @@ app.get('/', (req, res) => {
 // Routes
 app.use('/api/account-types', accountTypeRoutes);
 app.use('/api/bank-accounts', bankAccountRoutes);
+app.use('/api/bank-transactions', bankTransactionRoutes);
 app.use('/api/bank-account-types', bankAccountTypeRoutes);
 app.use('/api/bills', billRoutes);
 app.use('/api/chart-of-accounts', chartOfAccountsRoutes);

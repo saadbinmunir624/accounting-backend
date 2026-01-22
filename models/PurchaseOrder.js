@@ -184,7 +184,7 @@ const purchaseOrderSchema = new mongoose.Schema({
 });
 
 // Indexes
-purchaseOrderSchema.index({ purchaseOrderNumber: 1 });
+// purchaseOrderNumber already has unique index, no need for .index()
 purchaseOrderSchema.index({ contact: 1 });
 purchaseOrderSchema.index({ issueDate: -1 });
 purchaseOrderSchema.index({ status: 1 });

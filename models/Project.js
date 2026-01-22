@@ -45,8 +45,8 @@ const projectSchema = new mongoose.Schema({
   timestamps: true
 });
 
+// projectCode already has unique index, no need for .index()
 // Index for faster searches
-projectSchema.index({ projectCode: 1 });
 projectSchema.index({ contact: 1 });
 projectSchema.index({ status: 1 });
 projectSchema.index({ deadline: 1 });

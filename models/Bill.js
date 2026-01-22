@@ -160,7 +160,7 @@ const billSchema = new mongoose.Schema({
 
   status: {
     type: String,
-    enum: ['Draft', 'Sent', 'Paid', 'Overdue', 'Cancelled'],
+    enum: ['Draft', 'Payment Pending', 'Paid', 'Overdue', 'Cancelled'],
     default: 'Draft'
   },
 
@@ -173,7 +173,7 @@ const billSchema = new mongoose.Schema({
 });
 
 // Indexes
-billSchema.index({ billNumber: 1 });
+// billNumber already has unique index, no need for .index()
 billSchema.index({ contact: 1 });
 billSchema.index({ issueDate: -1 });
 billSchema.index({ status: 1 });
@@ -197,6 +197,26 @@ billSchema.pre('validate', function(next) {
       return next(new Error(
         `Split payment total ($${roundedTotal}) must equal grand total ($${roundedGrandTotal})`
       ));
+    }
+  }
+  next();
+});
+
+// ============================================
+// PRE-VALIDATE MIDDLEWARE 0.5: Auto-set Overdue status when due date passes
+// ============================================
+billSchema.pre('validate', function(next) {
+  // Only check for overdue if status is currently 'Payment Pending'
+  if (this.status === 'Payment Pending' && this.dueDate) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    const dueDate = new Date(this.dueDate);
+    dueDate.setHours(0, 0, 0, 0);
+    
+    // If due date has passed, automatically set to Overdue
+    if (dueDate < today) {
+      this.status = 'Overdue';
     }
   }
   next();

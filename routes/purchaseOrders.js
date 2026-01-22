@@ -9,11 +9,76 @@ const Item = require('../models/Item');
 const Project = require('../models/Project');
 
 // ============================================
+// TRACKING: Last overdue check date
+// ============================================
+let lastOverdueCheckDate = null;
+
+// ============================================
+// HELPER: Check if today is a new day
+// ============================================
+const isNewDay = () => {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  
+  if (!lastOverdueCheckDate) return true;
+  
+  const lastCheckDate = new Date(lastOverdueCheckDate);
+  lastCheckDate.setHours(0, 0, 0, 0);
+  
+  return today > lastCheckDate;
+};
+
+// ============================================
+// HELPER: Check and update overdue purchase orders (only once per day)
+// ============================================
+const updateOverduePurchaseOrders = async () => {
+  // Only run if it's a new day
+  if (!isNewDay()) {
+    console.log('>>> Overdue check already ran today, skipping...');
+    return;
+  }
+  
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  lastOverdueCheckDate = today;
+  
+  const sentPurchaseOrders = await PurchaseOrder.find({ status: 'Sent' });
+  
+  console.log(`\n>>> DAILY OVERDUE CHECK: Checking ${sentPurchaseOrders.length} 'Sent' purchase orders...`);
+  console.log(`Today's date (no time): ${today.toISOString().split('T')[0]}`);
+  
+  for (let purchaseOrder of sentPurchaseOrders) {
+    if (purchaseOrder.dueDate) {
+      const dueDate = new Date(purchaseOrder.dueDate);
+      dueDate.setHours(0, 0, 0, 0);
+      
+      const dueDateStr = dueDate.toISOString().split('T')[0];
+      console.log(`Purchase Order ${purchaseOrder.poNumber}: Due=${dueDateStr}, Status=${purchaseOrder.status}, IsPastDue=${dueDate < today}`);
+      
+      if (dueDate < today) {
+        console.log(`  → Updating ${purchaseOrder.poNumber} to Overdue`);
+        purchaseOrder.status = 'Overdue';
+        try {
+          await purchaseOrder.save();
+          console.log(`  ✓ Successfully saved ${purchaseOrder.poNumber}`);
+        } catch (err) {
+          console.error(`  ✗ Error saving ${purchaseOrder.poNumber}:`, err.message);
+        }
+      }
+    }
+  }
+  console.log(`<<< Overdue check complete\n`);
+};
+
+// ============================================
 // GET all purchase orders
 // ============================================
 router.get('/', async (req, res) => {
   try {
     const { status, contact, startDate, endDate } = req.query;
+
+    // Update overdue purchase orders before fetching
+    await updateOverduePurchaseOrders();
 
     const filter = {};
     if (status) filter.status = status;
@@ -257,6 +322,36 @@ router.patch('/:id', async (req, res) => {
         success: false,
         message: 'Purchase order not found'
       });
+    }
+
+    // Handle overdue logic on due date changes
+    if (req.body.dueDate) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const newDueDate = new Date(req.body.dueDate);
+      newDueDate.setHours(0, 0, 0, 0);
+
+      // Auto-revert: If updating dueDate to today/future and currently Overdue, move back to Sent (unless explicitly marking Paid)
+      if (existingPO.status === 'Overdue' && newDueDate >= today && req.body.status !== 'Paid') {
+        console.log(`  → Auto-reverting ${existingPO.poNumber} from Overdue to Sent (due date moved to future)`);
+        req.body.status = 'Sent';
+      }
+    }
+
+    // If purchase order is Overdue and due date is still in the past, only allow status change to Paid unless due date is moved future
+    if (existingPO.status === 'Overdue') {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const effectiveDue = req.body.dueDate ? new Date(req.body.dueDate) : existingPO.dueDate;
+      if (effectiveDue) effectiveDue.setHours(0, 0, 0, 0);
+
+      const stillPastDue = effectiveDue && effectiveDue < today;
+      if (stillPastDue && req.body.status && req.body.status !== 'Paid') {
+        return res.status(400).json({
+          success: false,
+          message: 'Overdue purchase order: change due date to today/future or set status to Paid'
+        });
+      }
     }
 
     // Don't allow editing purchase order number

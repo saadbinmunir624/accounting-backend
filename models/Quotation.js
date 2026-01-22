@@ -184,7 +184,7 @@ const quotationSchema = new mongoose.Schema({
 });
 
 // Indexes
-quotationSchema.index({ quotationNumber: 1 });
+// quotationNumber already has unique index, no need for .index()
 quotationSchema.index({ contact: 1 });
 quotationSchema.index({ issueDate: -1 });
 quotationSchema.index({ status: 1 });

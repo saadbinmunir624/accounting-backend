@@ -16,7 +16,12 @@ const bankAccountSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'BankAccountType',
     required: [true, 'Bank account type is required']
-  }
+  },
+  balance: {
+    type: Number,
+    default: 0,
+    min: 0,
+  },
 }, {
   timestamps: true
 });

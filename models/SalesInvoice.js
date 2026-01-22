@@ -176,17 +176,77 @@ const salesInvoiceSchema = new mongoose.Schema({
 });
 
 // Indexes
-salesInvoiceSchema.index({ invoiceNumber: 1 });
+// invoiceNumber already has unique index, no need for .index()
 salesInvoiceSchema.index({ contact: 1 });
 salesInvoiceSchema.index({ issueDate: -1 });
 salesInvoiceSchema.index({ status: 1 });
 
 // ============================================
-// PRE-VALIDATE MIDDLEWARE 0: Validate split payment amounts
+// PRE-VALIDATE MIDDLEWARE 0: Auto-set Overdue status when due date passes
 // ============================================
 salesInvoiceSchema.pre('validate', function(next) {
-  // If paymentAccounts exists and has items, validate the total
-  if (this.paymentAccounts && this.paymentAccounts.length > 0) {
+  // Only check for overdue if status is currently 'Sent'
+  if (this.status === 'Sent' && this.dueDate) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    const dueDate = new Date(this.dueDate);
+    dueDate.setHours(0, 0, 0, 0);
+    
+    // If due date has passed, automatically set to Overdue
+    if (dueDate < today) {
+      this.status = 'Overdue';
+    }
+  }
+  next();
+});
+
+// ============================================
+// PRE-VALIDATE MIDDLEWARE 1: Prevent status changes when Overdue
+// ============================================
+salesInvoiceSchema.pre('validate', function(next) {
+  // If invoice is overdue and someone tries to change status, block it
+  if (!this.isNew && this.isModified('status')) {
+    // Get the original document to check previous status
+    const originalStatus = this._original?.status;
+    
+    // If trying to change from Overdue to something else, check if due date is still in the past
+    if (originalStatus === 'Overdue' && this.status !== 'Overdue') {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
+      const dueDate = new Date(this.dueDate);
+      dueDate.setHours(0, 0, 0, 0);
+      
+      if (dueDate < today) {
+        return next(new Error('Cannot change status of overdue invoice. Please update the due date first.'));
+      }
+    }
+  }
+  next();
+});
+
+// ============================================
+// PRE-SAVE MIDDLEWARE: Store original status for validation
+// ============================================
+salesInvoiceSchema.pre('save', function(next) {
+  if (!this.isNew) {
+    this._original = this._doc;
+  }
+  next();
+});
+
+// ============================================
+// PRE-VALIDATE MIDDLEWARE 2: Validate split payment amounts (only when Paid)
+// ============================================
+salesInvoiceSchema.pre('validate', function(next) {
+  // Only validate payment when status is 'Paid'
+  if (this.status === 'Paid') {
+    // Payment accounts are required when marking as paid
+    if (!this.paymentAccounts || this.paymentAccounts.length === 0) {
+      return next(new Error('Payment details are required when marking invoice as Paid'));
+    }
+
     const totalPaymentAmount = this.paymentAccounts.reduce((sum, payment) => {
       return sum + (payment.amount || 0);
     }, 0);
@@ -198,7 +258,7 @@ salesInvoiceSchema.pre('validate', function(next) {
     // Allow small floating point differences (0.01)
     if (Math.abs(roundedTotal - roundedGrandTotal) > 0.01) {
       return next(new Error(
-        `Split payment total ($${roundedTotal}) must equal grand total ($${roundedGrandTotal})`
+        `Payment total ($${roundedTotal}) must equal grand total ($${roundedGrandTotal})`
       ));
     }
   }
