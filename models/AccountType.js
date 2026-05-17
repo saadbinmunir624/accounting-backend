@@ -6,6 +6,14 @@ const accountTypeSchema = new mongoose.Schema({
     required: [true, 'Account type name is required'],
     unique: true,
     trim: true
+  },
+  // High-level group for this account type (for filters/headings)
+  majorType: {
+    type: String,
+    enum: ['Assets', 'Liabilities', 'Equity', 'Revenue', 'Expenses'],
+    required: false,
+    default: null,
+    trim: true,
   }
 }, {
   timestamps: true

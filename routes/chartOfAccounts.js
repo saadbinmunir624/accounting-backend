@@ -2,14 +2,15 @@
 const express = require('express');
 const router = express.Router();
 const ChartOfAccount = require('../models/ChartOfAccount');
-const AccountType = require('../models/AccountType'); // ADD THIS LINE
-const TaxType = require('../models/TaxType'); // ADD THIS LINE
+const AccountType = require('../models/AccountType');
+const TaxType = require('../models/TaxType');
+const defaultChartOfAccounts = require('../config/defaultChartOfAccounts');
 
 // Get all accounts (with populated references)
 router.get('/', async (req, res) => {
   try {
     const accounts = await ChartOfAccount.find()
-      .populate('accountType', 'name')
+      .populate('accountType', 'name majorType')
       .populate('tax', 'name taxPercentage')
       .sort({ code: 1 });
     
@@ -28,11 +29,93 @@ router.get('/', async (req, res) => {
   }
 });
 
+// Import a general/default chart of accounts
+router.post('/import-defaults', async (req, res) => {
+  try {
+    // Optional: avoid creating duplicates by code
+    const existingAccounts = await ChartOfAccount.find({}, 'code');
+    const existingCodes = new Set(existingAccounts.map(acc => acc.code));
+
+    // Load all account types once and map by name for quick lookup
+    const accountTypes = await AccountType.find({});
+    const accountTypeByName = new Map(
+      accountTypes.map(t => [t.name.toLowerCase(), t])
+    );
+
+    const accountsToInsert = [];
+    const skipped = [];
+
+    for (const def of defaultChartOfAccounts) {
+      // Skip if account with same code already exists
+      if (existingCodes.has(def.code)) {
+        skipped.push({ code: def.code, reason: 'Account code already exists' });
+        continue;
+      }
+
+      let accountTypeId = undefined;
+      if (def.accountTypeName) {
+        const key = def.accountTypeName.toLowerCase();
+        const foundType = accountTypeByName.get(key);
+        if (!foundType) {
+          skipped.push({
+            code: def.code,
+            reason: `AccountType '${def.accountTypeName}' not found`,
+          });
+          continue;
+        }
+        accountTypeId = foundType._id;
+      }
+
+      accountsToInsert.push({
+        code: def.code,
+        name: def.name,
+        description: def.description || '',
+        accountType: accountTypeId,
+      });
+    }
+
+    if (accountsToInsert.length === 0) {
+      return res.status(200).json({
+        success: true,
+        message: 'No new accounts to import',
+        importedCount: 0,
+        skipped,
+      });
+    }
+
+    const inserted = await ChartOfAccount.insertMany(accountsToInsert, {
+      ordered: false,
+    });
+
+    const populatedInserted = await ChartOfAccount.find({
+      _id: { $in: inserted.map(a => a._id) },
+    })
+      .populate('accountType', 'name majorType')
+      .populate('tax', 'name taxPercentage')
+      .sort({ code: 1 });
+
+    res.status(201).json({
+      success: true,
+      message: 'Default chart of accounts imported successfully',
+      importedCount: inserted.length,
+      skipped,
+      data: populatedInserted,
+    });
+  } catch (error) {
+    console.error('IMPORT default chart of accounts error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server Error',
+      error: error.message,
+    });
+  }
+});
+
 // Get single account by ID
 router.get('/:id', async (req, res) => {
   try {
     const account = await ChartOfAccount.findById(req.params.id)
-      .populate('accountType', 'name')
+      .populate('accountType', 'name majorType')
       .populate('tax', 'name taxPercentage');
     
     if (!account) {
@@ -68,7 +151,7 @@ router.get('/:id', async (req, res) => {
 router.get('/code/:code', async (req, res) => {
   try {
     const account = await ChartOfAccount.findOne({ code: req.params.code })
-      .populate('accountType', 'name')
+      .populate('accountType', 'name majorType')
       .populate('tax', 'name taxPercentage');
     
     if (!account) {
@@ -176,7 +259,7 @@ router.patch('/:id', async (req, res) => {
       req.body,
       { new: true, runValidators: true }
     )
-      .populate('accountType', 'name')
+      .populate('accountType', 'name majorType')
       .populate('tax', 'name taxPercentage');
     
     if (!updatedAccount) {
@@ -226,7 +309,7 @@ router.put('/:id', async (req, res) => {
       req.body,
       { new: true, runValidators: true }
     )
-      .populate('accountType', 'name')
+      .populate('accountType', 'name majorType')
       .populate('tax', 'name taxPercentage');
     
     if (!updatedAccount) {
